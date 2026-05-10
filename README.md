@@ -1,5 +1,9 @@
-This repository contains analysis pipelines for investigating infra-slow electrophysiological interactions between the brain, heart, and gut in humans during resting state. Using simultaneous electroencephalographic (EEG), electrocardiographic (ECG), and electrogastrographic (EGG) recordings acquired from healthy participants.
-Time-resolved physiological markers were extracted for each organ, including EEG alpha-band power, cardiac sympathetic and parasympathetic indices (CSI, CPI), and gastric rhythm power. Coupling between physiological time series was quantified using the Maximal Information Coefficient (MIC) across extended temporal delays, followed by surrogate-based statistical testing to identify significant interactions.
+This repository contains analysis pipelines for investigating infra-slow electrophysiological interactions between the brain, heart, and gut in humans during resting state using simultaneous electroencephalographic (EEG), electrocardiographic (ECG), and electrogastrographic (EGG) recordings.
+
+Time-resolved physiological markers were extracted for each organ, including EEG alpha-band power, cardiac sympathetic and parasympathetic indices (CSI, CPI), and gastric rhythm power. 
+
+Coupling between physiological time series was quantified using the Maximal Information Coefficient (MIC) across extended temporal delays, followed by surrogate-based statistical testing to identify significant interactions.
+
 The resulting significant couplings were integrated to reconstruct large-scale electrophysiological networks summarizing the strength, temporal delays, and directionality of interactions among the brain, heart, and gut.
 
 # Repository Structure
