@@ -1,4 +1,4 @@
-This repository contains analysis pipelines for investigating infra-slow electrophysiological interactions between the brain, heart, and gut in humans during resting state using simultaneous electroencephalographic (EEG), electrocardiographic (ECG), and electrogastrographic (EGG) recordings.
+This repository contains analysis pipelines for investigating electrophysiological interactions between the brain, heart, and gut in humans during resting state using simultaneous electroencephalographic (EEG), electrocardiographic (ECG), and electrogastrographic (EGG) recordings.
 
 Time-resolved physiological markers were extracted for each organ, including EEG alpha-band power, cardiac sympathetic and parasympathetic indices (CSI, CPI), and gastric rhythm power. 
 
