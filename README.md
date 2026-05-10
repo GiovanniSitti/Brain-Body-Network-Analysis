@@ -1,6 +1,6 @@
 This repository contains an analysis pipeline for investigating electrophysiological interactions between the brain, heart, and gut in humans during resting state using simultaneous electroencephalographic (EEG), electrocardiographic (ECG), and electrogastrographic (EGG) recordings.
 
-Time-resolved physiological markers were extracted for each organ, including EEG alpha-band power, cardiac sympathetic and parasympathetic indices (CSI, CPI), and gastric rhythm power. 
+Time-resolved physiological markers were extracted for each organ, including EEG alpha-band power, cardiac sympathetic and parasympathetic indices (CSI, CPI), and gastric rhythm power dynamics. 
 
 Coupling between physiological time series was quantified using the Maximal Information Coefficient (MIC) across extended temporal delays, followed by surrogate-based statistical testing to identify significant interactions.
 
@@ -22,6 +22,7 @@ graph_reconstruction/
 The analysis pipeline was developed using:
 - MATLAB
 - FieldTrip toolbox
+- R-DECO toolbox
 - MINEpy (Maximal Information-based Nonparametric Exploration)
 
 # Citation
