@@ -1,0 +1,597 @@
+%% Brain–heart–gut coupling and network reconstruction pipeline
+
+% DOI:
+% https://doi.org/10.64898/2026.04.15.718683
+%
+% Main analysis steps:
+%
+% - Load multimodal EEG, ECG, and EGG physiological markers timeseries 
+% - Compute delayed coupling between physiological signals
+% - Quantify nonlinear associations using the Maximal Information Coefficient (MIC)
+% - Estimate coupling across extended temporal delay ranges
+% - Generate IAAFT surrogate physiological signals
+% - Perform surrogate-based statistical significance testing
+% - Identify significant brain–heart, brain–gut, and heart–gut interactions
+% - Estimate predominant interaction delays and directionality
+% - Reconstruct large-scale electrophysiological interaction networks
+%
+% Physiological signals:
+%
+% - EEG alpha-band power
+% - Cardiac sympathetic index (CSI)
+% - Cardiac parasympathetic index (CVI/CPI)
+% - Gastric rhythm power (EGG)
+%
+% Required external functions and libraries:
+%
+% - FieldTrip
+% - MINEpy
+% - build_graph.m
+%
+% The surrogate generation function sir_surriaafft.m was adapted from the
+% SIR toolbox presented in:
+%
+% Sparacino L., Antonacci Y., Mijatovic G., Faes L. (2025)
+% "Measuring hierarchically-organized interactions in dynamic networks
+% through spectral entropy rates: Theory, estimation, and illustrative
+% application to physiological networks
+
+close all
+clear all
+clc
+  
+%%
+%load data
+load('X.mat');
+
+Tmax   =120; %set delay range
+lag_index = -Tmax:1:Tmax;
+
+EEG_labels = { ...
+    'Fp1','Fp2','F7','F3','Fz','F4','F8', ...
+    'FC5','FC1','FC2','FC6', ...
+    'T7','C3','Cz','C4','T8', ...
+    'TP9','CP5','CP1','CP2','CP6','TP10', ...
+    'P7','P3','Pz','P4','P8', ...
+    'PO9','O1','Oz','O2','PO10' };
+
+subjects=1:28 
+
+Ntargets = 3;
+Nsurr   =   100;
+alpha = 0.05;
+
+%init variables 
+Nchan   = length(EEG_labels);
+Nsubj   = length(subjects);
+
+val_sign_all = zeros(Nsubj,Nchan,Ntargets);
+delay_real_all= zeros(Nsubj,Nchan,Ntargets);
+
+
+%% Brain - Body couplings 
+
+for s = 1:Nsubj
+
+    EEG = X(s).EEG;
+    CSI = X(s).CSI;
+    CVI = X(s).CVI;
+    EGG = X(s).EGG;
+    
+    targets = [CSI; CVI; EGG];
+    target_names = {'EEG–CSI','EEG–CVI','EEG–EGG'};
+
+    val_real_subj = zeros(Nchan,Ntargets);
+    val_surr_subj = zeros(Nchan,Ntargets,Nsurr);
+    delay_real_subj = zeros(Nchan,Ntargets);
+
+
+    for ch = 1:Nchan   
+        
+        fprintf('Subject %d – channel %d\n', s, ch);
+
+        Xeeg = EEG(ch,:)';
+     
+       
+   
+        for t = 1:Ntargets
+            
+            Y = targets(t,:)';
+
+            val_lag = mic_lagged_mine(Xeeg,Y,lag_index);
+            [val_real_subj(ch,t),idx] = max(val_lag);
+             delay_real_subj(ch,t) = lag_index(idx);
+            
+            % surrogate at best lag
+            for is = 1:Nsurr
+
+                Xs = sir_surriaafft(Xeeg);
+                Ys = sir_surriaafft(Y);
+                mic_s =mic_lagged_mine(Xs,Ys, delay_real_subj(ch,t));
+                val_surr_subj(ch,t,is) = mic_s;
+
+            end
+        end
+    end
+    
+    % statistical significance test 
+    
+    val_sig = zeros(Nchan,Ntargets);
+    
+    for ch = 1:Nchan
+        for t = 1:Ntargets
+            
+            val_surr=squeeze(val_surr_subj(ch,t,:));
+            p = sum( val_surr > val_real_subj(ch,t)) / Nsurr;
+            if p < alpha
+                val_sig(ch,t) = val_real_subj(ch,t);
+
+            end
+        end
+    end
+
+    val_sign_all(s,:,:) = val_sig;     
+    delay_real_all(s,:,:) = delay_real_subj;
+
+end
+
+
+nLag  = length(lag_index);
+nPairs = 2;   % EGG–CSI, EGG–CVI
+
+%init group variables
+mic_real_all_body  = zeros(Nsubj,nPairs,nLag);
+mic_max_pos_body   = zeros(Nsubj,nPairs);
+mic_max_neg_body   = zeros(Nsubj,nPairs);
+lag_max_pos_body   = zeros(Nsubj,nPairs);
+lag_max_neg_body   = zeros(Nsubj,nPairs);
+mic_surr_pos_body  = zeros(Nsubj,nPairs,Nsurr);
+mic_surr_neg_body  = zeros(Nsubj,nPairs,Nsurr);
+
+
+for s = 1:Nsubj
+
+    fprintf('Subject: %d ', s);
+    
+    CSI = X(s).CSI;
+    CVI = X(s).CVI;
+    EGG= X(s).EGG;
+
+    X_EGG  = EGG';
+    X_ECG = [CSI; CVI];
+
+    for p = 1:nPairs
+        
+        y = X_ECG(p,:)';
+    
+        mic_lag_body = mic_lagged_mine(X_EGG, y,lag_index);
+         mic_real_all_body(s,p,:) =  mic_lag_body;
+    
+        % positive delays
+        lags_pos = lag_index(lag_index > 0);
+        mic_pos  =  mic_lag_body(lag_index > 0);
+    
+        [mic_max_pos_body(s,p), ix_pos] = max(mic_pos);
+        lag_max_pos_body(s,p) = lags_pos(ix_pos);
+    
+        % negative delays
+        lags_neg = lag_index(lag_index < 0);
+         mic_neg  =  mic_lag_body(lag_index < 0);
+    
+        [ mic_max_neg_body(s,p), ix_neg] = max(mic_neg);
+        lag_max_neg_body(s,p) = lags_neg(ix_neg);
+
+  
+        lag_target_pos = lag_max_pos_body(s,p);
+        lag_target_neg = lag_max_neg_body(s,p);
+
+        for is = 1:Nsurr
+            
+            xs = sir_surriaafft(X_EGG);
+            ys = sir_surriaafft(y);
+
+            mic_surr_pos_body(s,p,is) = mic_lagged_mine(xs, ys, lag_target_pos);
+        
+            mic_surr_neg_body(s,p,is) = mic_lagged_mine(xs, ys, lag_target_neg);
+
+        end
+    end
+end
+
+%monte carlo 
+
+sig_pos_body       = zeros(Nsubj,nPairs);
+sig_neg_body       = zeros(Nsubj,nPairs);
+
+for s = 1:Nsubj
+
+    for p = 1:nPairs
+
+        % (EGG -> y)
+        real_pos  = mic_max_pos_body(s,p);
+        surr_pos  = squeeze(mic_surr_pos_body(s,p,:));
+
+        pval_pos = (sum(surr_pos > real_pos)) / Nsurr;
+        sig_pos_body(s,p)  = pval_pos < alpha;
+
+        % (y -> EGG) 
+        real_neg  =mic_max_neg_body(s,p);
+        surr_neg  = squeeze(mic_surr_neg_body(s,p,:));
+ 
+        pval_neg = (sum(surr_neg > real_neg)) / Nsurr;
+        sig_neg_body(s,p)  = pval_neg < alpha;
+
+    end
+end
+
+%% median group heart gut
+
+mic_max_pos_sig = mic_max_pos_body;
+mic_max_pos_sig(~sig_pos_body) = NaN;
+
+lag_max_pos_sig = lag_max_pos_body;
+lag_max_pos_sig(~sig_pos_body) = NaN;
+
+mic_max_neg_sig = mic_max_neg_body;
+mic_max_neg_sig(~sig_neg_body) = NaN;
+
+lag_max_neg_sig = lag_max_neg_body;
+lag_max_neg_sig(~sig_neg_body) = NaN;
+
+mic_group_median_pos_body = median(mic_max_pos_sig,1,'omitnan');
+lag_group_median_pos_body =  round(median(lag_max_pos_sig,1,'omitnan'));
+
+mic_group_median_neg_body = median(mic_max_neg_sig,1,'omitnan');
+lag_group_median_neg_body = round(median(lag_max_neg_sig,1,'omitnan'));
+
+subj_sig_pos = any(sig_pos_body, 2);  
+subj_sig_neg = any(sig_neg_body, 2);  
+
+% significative subjects
+
+perc_subj_sig_pos = 100 * sum(subj_sig_pos) / Nsubj
+perc_subj_sig_neg = 100 * sum(subj_sig_neg) / Nsubj
+
+
+%% headmap single subjects
+
+% for s=1:Nsubj
+% 
+%     cfg = [];
+%     cfg.layout = 'custom_32.lay';
+%     cfg.marker = 'labels';
+%     cfg.comment = 'no';
+%     cfg.colorbar = 'no';
+%     cfg.figure = 'gca';
+%     cfg.zlim=[0 0.6];
+% 
+%     figure('Color','w','Position',[100 100 1600 500])
+%     tiledlayout(1,3,'TileSpacing','compact','Padding','compact')
+% 
+%     for t = 1:3
+%         nexttile
+%         data.label = EEG_labels;
+%         data.dimord = 'chan';
+%         data.avg = squeeze(val_sign_all(s,:,t));
+%         ft_topoplotER(cfg,data)
+%         title(target_names{t})
+%     end
+% 
+%     cb = colorbar;
+%     cb.Layout.Tile = 'east';
+% 
+%     ylabel(cb,'MIC ')
+%     sgtitle(sprintf(' Subject %d | MIC',s),'FontWeight','bold')
+% 
+%     figure('Color','w','Position',[100 100 1600 900])
+%     tiledlayout(2,3,'TileSpacing','compact','Padding','compact')
+%     names = {'EEG','CSI','CVI','EGG'};
+% 
+%     %split positive dir
+%     for t = 1:3
+%         topo = zeros(Nchan,1);
+%         idx = delay_real_all(s,:,t) > 0;
+%         topo(idx) = val_sign_all(s,idx,t);
+%         nexttile
+%         data.avg = topo;
+%         ft_topoplotER(cfg,data)
+%         title([names{1} ' → ' names{t+1}])
+%     end
+% 
+%     %split negative dir
+%     for t = 1:3
+%         topo = zeros(Nchan,1);
+%         idx = delay_real_all(s,:,t) < 0;
+%         topo(idx) = val_sign_all(s,idx,t);
+%         nexttile
+%         data.avg = topo;
+%         ft_topoplotER(cfg,data)
+%         title([names{t+1} ' → ' names{1}])
+%     end
+% 
+%     cb = colorbar; cb.Layout.Tile = 'east';
+%     ylabel(cb,'MIC')
+%     sgtitle(sprintf('MIC – Subject %d ',s),'FontWeight','bold')
+% end
+
+%% Median group stats brain body
+
+perc_thr =0.7 %threshold significance
+
+[Nsubj,Nchan,Ntargets] = size(val_sign_all);
+ 
+sig_mask = val_sign_all > 0; 
+count_sig = squeeze(sum(sig_mask,1)); % count significative subj per channels
+chan_sel  = count_sig >= ceil(perc_thr*Nsubj);
+
+val_group = squeeze(median(val_sign_all,1,'omitnan'));
+val_group(~chan_sel) = 0; % take only significant channels at X % subjects 
+
+delay_group = squeeze(median(delay_real_all,1,'omitnan'));
+delay_group(~chan_sel) = NaN;
+
+
+
+figure
+
+% median headmap 
+
+cfg = [];
+cfg.layout   = 'custom_32.lay';
+cfg.marker   = 'labels';
+cfg.comment  = 'no';
+cfg.colorbar = 'no';
+cfg.figure   = 'gca';
+cfg.zlim=[0 0.6];
+
+
+tiledlayout(1,3,'TileSpacing','compact','Padding','compact')
+
+for t = 1:3
+    nexttile
+
+    data = [];
+    data.label  = EEG_labels;
+    data.dimord = 'chan';
+    data.avg    = val_group(:,t);
+
+    ft_topoplotER(cfg,data)
+
+    title(target_names{t},'FontWeight','bold')
+end
+
+
+cb = colorbar; 
+cb.Layout.Tile = 'east';
+ylabel(cb,'Median MIC')
+
+sgtitle(sprintf(' Group median (singnificance ≥ %.0f%% subjects)',perc_thr*100), ...
+    'FontSize',14,'FontWeight','bold')
+
+
+% split headmaps 
+figure
+
+cfg = [];
+cfg.layout   = 'custom_32.lay';
+cfg.marker   = 'labels';
+cfg.comment  = 'no';
+cfg.colorbar = 'no';
+cfg.figure   = 'gca';
+cfg.zlim=[0 0.6];
+
+
+names = {'EEG','CSI','CVI','EGG'};
+
+tiledlayout(2,3,'TileSpacing','compact','Padding','compact')
+
+
+for t = 1:3
+    topo = zeros(Nchan,1);
+    idx  = delay_group(:,t) > 0;
+    topo(idx) = val_group(idx,t);
+
+    nexttile
+    data = [];
+    data.label  = EEG_labels;
+    data.dimord = 'chan';
+    data.avg    = topo;
+
+    ft_topoplotER(cfg,data)
+    colormap(turbo)
+    title([names{1} ' → ' names{t+1}],'FontWeight','bold')
+end
+
+
+for t = 1:3
+    topo = zeros(Nchan,1);
+    idx  = delay_group(:,t) < 0;
+    topo(idx) = val_group(idx,t);
+
+    nexttile
+    data.avg = topo;
+    ft_topoplotER(cfg,data)
+   
+    title([names{t+1} ' → ' names{1}],'FontWeight','bold')
+end
+
+cb = colorbar;
+cb.Layout.Tile = 'east';
+ylabel(cb,'Median MIC (α-band)')
+
+sgtitle(sprintf('ALFA – Group median MIC (singnificance >= %.0f%% subjects)', ...
+    perc_thr*100), ...
+    'FontSize',14,'FontWeight','bold')
+
+
+%%%%%% Graph and histogram delay %%%%%%%%%%%%%%%%%%%
+ 
+
+%% graph
+ 
+[ch_out, ch_in, EEG_OUT_label, EEG_IN_label] = build_graph(val_group, delay_group, EEG_labels, ...
+                         mic_group_median_pos_body, lag_group_median_pos_body, mic_group_median_neg_body, lag_group_median_neg_body)
+
+%% histogram delays
+
+xlims = [-Tmax Tmax];
+binW  = 5;
+
+[nSubj,~,nt] = size(val_sign_all);
+
+
+delay_eeg_pos = cell(1,nt);
+delay_eeg_neg = cell(1,nt);
+
+% split brain body delay 
+
+for t = 1:nt
+
+    mic_pos = squeeze(val_sign_all(:,ch_out,t));
+    lag_pos = squeeze(delay_real_all(:,ch_out,t));
+
+    mask_pos = mic_pos > 0 & lag_pos > 0;
+    delay_eeg_pos{t} = lag_pos(mask_pos);
+
+    mic_neg = squeeze(val_sign_all(:,ch_in,t));
+    lag_neg = squeeze(delay_real_all(:,ch_in,t));
+
+    mask_neg = mic_neg > 0 & lag_neg < 0;
+    delay_eeg_neg{t} = lag_neg(mask_neg);
+
+end
+
+
+% split gut heart delay
+nPairs = 2;
+delay_body_pos = cell(1,nPairs);
+delay_body_neg = cell(1,nPairs);
+
+for p = 1:nPairs
+
+    mic_pos = mic_max_pos_sig(:,p);
+    lag_pos = lag_max_pos_sig(:,p);
+
+    mask_pos = mic_pos > 0 & lag_pos > 0;
+    delay_body_pos{p} = lag_pos(mask_pos);
+
+    mic_neg = mic_max_neg_sig(:,p);
+    lag_neg = lag_max_neg_sig(:,p);
+
+    mask_neg = mic_neg > 0 & lag_neg < 0;
+    delay_body_neg{p} = lag_neg(mask_neg);
+
+end
+
+%%% build histogram
+
+figure('Color','w','Position',[200 100 850 1200])
+
+tiledlayout(5,1,'TileSpacing','loose','Padding','compact')
+
+% EEG – CSI
+nexttile
+hold on
+histogram(delay_eeg_pos{1},'BinWidth',binW,'BinLimits',xlims,'FaceAlpha',0.6)
+histogram(delay_eeg_neg{1},'BinWidth',binW,'BinLimits',xlims,'FaceAlpha',0.6)
+xline(0,'k--')
+title('EEG–CSI')
+ylabel('# Subjects')
+grid on
+yl = ylim; 
+ylim([0 yl(2)*1.15])
+lgd = legend('EEG → CSI','CSI → EEG');
+lgd.FontSize = 10; 
+lgd.Box = 'off';
+
+% EEG – CVI
+nexttile
+hold on
+histogram(delay_eeg_pos{2},'BinWidth',binW,'BinLimits',xlims,'FaceAlpha',0.6)
+histogram(delay_eeg_neg{2},'BinWidth',binW,'BinLimits',xlims,'FaceAlpha',0.6)
+xline(0,'k--')
+title('EEG–CVI')
+ylabel('# Subjects')
+grid on
+yl = ylim; ylim([0 yl(2)*1.15])
+lgd = legend('EEG → CVI','CVI → EEG');
+lgd.FontSize = 10; lgd.Box = 'off';
+
+% EEG – EGG
+nexttile
+hold on
+histogram(delay_eeg_pos{3},'BinWidth',binW,'BinLimits',xlims,'FaceAlpha',0.6)
+histogram(delay_eeg_neg{3},'BinWidth',binW,'BinLimits',xlims,'FaceAlpha',0.6)
+xline(0,'k--')
+title('EEG–EGG')
+ylabel('# Subjects')
+grid on
+yl = ylim; ylim([0 yl(2)*1.15])
+lgd = legend('EEG → EGG','EGG → EEG');
+lgd.FontSize = 10; lgd.Box = 'off';
+
+% EGG – CSI
+nexttile
+hold on
+histogram(delay_body_pos{1},'BinWidth',binW,'BinLimits',xlims,'FaceAlpha',0.6)
+histogram(delay_body_neg{1},'BinWidth',binW,'BinLimits',xlims,'FaceAlpha',0.6)
+xline(0,'k--')
+title('EGG–CSI')
+ylabel('# Subjects')
+grid on
+yl = ylim; ylim([0 yl(2)*1.15])
+lgd = legend('EGG → CSI','CSI → EGG');
+lgd.FontSize = 10; lgd.Box = 'off';
+
+% EGG – CVI
+nexttile
+hold on
+histogram(delay_body_pos{2},'BinWidth',binW,'BinLimits',xlims,'FaceAlpha',0.6)
+histogram(delay_body_neg{2},'BinWidth',binW,'BinLimits',xlims,'FaceAlpha',0.6)
+xline(0,'k--')
+title('EGG–CVI')
+xlabel('Delay (s)')
+ylabel('# Subjects')
+grid on
+yl = ylim; ylim([0 yl(2)*1.15])
+lgd = legend('EGG → CVI','CVI → EGG');
+lgd.FontSize = 10; lgd.Box = 'off';
+
+
+
+%%  topoplot n. subjects per channel 
+
+% figure('Color','w','Position',[100 100 1000 500])
+% 
+% cfg = [];
+% cfg.layout   = 'custom_32.lay';
+% cfg.marker   = 'labels';
+% cfg.comment  = 'no';
+% cfg.colorbar = 'no';
+% cfg.figure   = 'gca';
+% cfg.zlim=[0 28];
+% 
+% 
+% tiledlayout(1,nt,'TileSpacing','compact','Padding','compact')
+% 
+% for t = 1:nt
+%     nexttile
+% 
+%     data = [];
+%     data.label  = EEG_labels;
+%     data.dimord = 'chan';
+%     data.avg    = count_sig(:,t)
+% 
+%     ft_topoplotER(cfg,data)
+% 
+%     title(target_names{t},'FontWeight','bold')
+% 
+% 
+% end
+% 
+% cb = colorbar; 
+% cb.Layout.Tile = 'east';
+% ylabel(cb,' n.subjects')
+% sgtitle('mic - count significative subject per channel')
+% 
+% figure('Color','w','Position',[200 200 1200 400])
