@@ -1,8 +1,5 @@
 %% Brain–heart–gut coupling and network reconstruction pipeline
 
-% DOI:
-% https://doi.org/10.64898/2026.04.15.718683
-%
 % Main analysis steps:
 %
 % - Load multimodal EEG, ECG, and EGG physiological markers timeseries 
